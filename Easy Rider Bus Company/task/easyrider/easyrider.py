@@ -1,0 +1,77 @@
+import re
+import json
+
+# path_to_html = "./Unlost in time/task.html"
+
+pattern_stop_name = re.compile(r'^[A-Z][a-z]+ (Road|Avenue|Boulevard|Street)$')
+pattern_stop_type = re.compile(r'[SOF]?$')
+pattern_a_time = re.compile(r'^(?:[01]\d|2[0-3]):[0-5]\d$')
+
+
+correct_data_types = {
+    "bus_id": {"type":int,"format": False, "required": True},
+    "stop_id": {"type":int,"format": False, "required": True},
+    "stop_name": {"type":str,"format": pattern_stop_name, "required": True},
+    "next_stop": {"type":int,"format": False, "required": True},
+    "stop_type": {"type":str,"format": pattern_stop_type, "required": False},
+    "a_time": {"type":str,"format": pattern_a_time, "required": True}
+}
+
+
+def output(err:dict) -> None:
+    total_err = sum([value for value in err.values()])
+    print(f"Type and field validation: {total_err} errors")
+    print(f"bus_id: {err['bus_id']}")
+    print(f"stop_id: {err['stop_id']}")
+    print(f"stop_name: {err['stop_name']}")
+    print(f"next_stop: {err['next_stop']}")
+    print(f"stop_type: {err['stop_type']}")
+    print(f"a_time: {err['a_time']}")
+
+
+def find_error(data:list) -> dict:
+    error_list = {key: 0 for key in correct_data_types}
+
+    for line in data:
+        for field, specs in correct_data_types.items():
+            required = specs["required"]
+            expected_type = specs["type"]
+            format_pattern = specs["format"]
+
+            value = line.get(field)
+
+            # Check for required fields
+            if required == True and value == "":
+                error_list[field] += 1
+                continue
+
+            # Check for correct type
+            if value is not None and not isinstance(value, expected_type):
+                error_list[field] += 1
+                continue
+
+            # Check format if pattern exist
+            if value is not None and format_pattern != False and field != "stop_name":
+                if not re.match(format_pattern, str(value)):
+                    error_list[field] += 1
+
+    return error_list
+
+
+def main():
+    # # Open and read the JSON file
+    # filename = 'test_file.json'
+    # # print("Input: " + filename)
+    # with open(filename, 'r', encoding='utf-8') as file:
+    #     data = json.load(file)
+
+    data = json.loads(input())
+
+    result_errors = find_error(data)
+
+    # Output result
+    output(result_errors)
+
+
+if __name__ == "__main__":
+    main()
