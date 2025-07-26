@@ -37,41 +37,57 @@ def output(err: dict, bus_lines: dict) -> None:
     for bus, stops in bus_lines.items():
         print(f"bus_id: {bus} stops: {stops}")
 
+def is_required_field_valid(value, required):
+    return not (required and value == "")
 
-def find_error(data: dict) -> tuple[dict[str, int], dict[int, int]]:
+def is_type_valid(value, expected_type):
+    return isinstance(value, expected_type)
+
+def is_format_valid(value, format_pattern):
+    return format_pattern is False or re.match(format_pattern, str(value))
+
+def aggregate_errors(data: dict) -> dict[str, int]:
     error_list = {key: 0 for key in correct_data_types}
-    bus_lines = {}
 
     for line in data:
-        bus_id = line["bus_id"]
-        if bus_id not in bus_lines.keys():
-            bus_lines[bus_id] = 1
-        else:
-            bus_lines[bus_id] += 1
-
         for field, specs in correct_data_types.items():
+            value = line.get(field)
             required = specs["required"]
             expected_type = specs["type"]
             format_pattern = specs["format"]
 
-            value = line.get(field)
-
             # Check for required fields
-            if required == True and value == "":
+            if not is_required_field_valid(value, required):
                 error_list[field] += 1
                 continue
 
             # Check for correct type
-            if value is not None and not isinstance(value, expected_type):
+            if value is not None and not is_type_valid(value, expected_type):
                 error_list[field] += 1
                 continue
 
             # Check format if pattern exist
-            if value is not None and format_pattern != False:
-                if not re.match(format_pattern, str(value)):
-                    error_list[field] += 1
+            if value is not None and not is_format_valid(value, format_pattern):
+                error_list[field] += 1
 
-    return error_list, bus_lines
+    return error_list
+
+
+def count_bus_stops(data: list[dict]) -> dict[int, int]:
+    stop_counts = {}
+
+    for entry in data:
+        bus_id = entry.get("bus_id")
+
+        # Only count valid bus_id entries
+        if isinstance(bus_id, int):
+            stop_counts[bus_id] = stop_counts.get(bus_id, 0) + 1
+
+    return stop_counts
+
+
+def load_data():
+    return json.loads(input())
 
 
 def main():
@@ -79,9 +95,10 @@ def main():
     # with open('test_file_3.json', 'r', encoding='utf-8') as file:
     #     data = json.load(file)
 
-    data = json.loads(input())
+    data = load_data()
 
-    result_errors, bus_lines = find_error(data)
+    result_errors = aggregate_errors(data)
+    bus_lines = count_bus_stops(data)
 
     # Output result
     output(result_errors, bus_lines)
