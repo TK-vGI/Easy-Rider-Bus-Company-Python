@@ -1,0 +1,14 @@
+easyrider/
+├── __init__.py
+├── config.py           # Configuration Module: Stores constants like field patterns and specifications.
+├── data_loader.py      # Handles loading JSON data.
+├── validator.py        # Validates field types, formats, and time chronology.
+├── analyzer.py         # Analyzes bus lines, stops, and transfers.
+├── output_formatter.py # Formats and prints results.
+├── easyrider.py        # Main entry point to orchestrate the modules.
+└── test_file_6.json
+
+To test the refactored code:
+1. Create the directory structure above.
+2. Place test_file_#.json in the <easyrider> directory.
+3. Run python easyrider/easyrider.py from the parent directory.

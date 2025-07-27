@@ -1,238 +1,39 @@
-import re
-import json
-from datetime import datetime
-
-# path_to_html = "./Unlost in time/task.html"
-
-PATTERNS = {
-    "stop_name": re.compile(r'^([A-Z][a-z]+(?: [A-Z][a-z]+)*) (Road|Avenue|Boulevard|Street)$'),
-    "stop_type": re.compile(r'[SOF]?$'),
-    "a_time": re.compile(r'^(?:[01]\d|2[0-3]):[0-5]\d$')
-}
-
-correct_data_types = {
-    "bus_id": {"type": int, "format": False, "required": True},
-    "stop_id": {"type": int, "format": False, "required": True},
-    "stop_name": {"type": str, "format": PATTERNS["stop_name"], "required": True},
-    "next_stop": {"type": int, "format": False, "required": True},
-    "stop_type": {"type": str, "format": PATTERNS["stop_type"], "required": False},
-    "a_time": {"type": str, "format": PATTERNS["a_time"], "required": True}
-}
-
-correct_bus_lines = {
-    128: {"stops": 8, "S": "Fifth Avenue", "F": "Prospekt Avenue",
-          "stop_names": ["Fifth Avenue", "Abbey Road", "Santa Monica Boulevard", "Elm Street", "Beale Street",
-                         "Sesame Street", "Bourbon Street", "Prospekt Avenue"],
-          "color": "red"},
-    256: {"stops": 9, "S": "Pilotow Street", "F": "Michigan Avenue",
-          "stop_names": ["Pilotow Street", "Startowa Street", "Elm Street", "Lombard Street", "Sesame Street",
-                         "Orchard Road", "Sunset Boulevard", "Khao San Road", "Michigan Avenue"],
-          "color": "green"},
-    512: {"stops": 8, "S": "Arlington Road", "F": "Prospekt Avenue",
-          "stop_names": ["Arlington Road", "Parizska Street", "Elm Street", "Niebajka Avenue", "Jakis Street",
-                         "Sunset Boulevard", "Jakas Avenue", "Prospekt Avenue"],
-          "color": "blue"},
-}
+from typing import List, Dict, Optional
+from data_loader import load_data
+from validator import aggregate_errors
+from analyzer import count_bus_stops, get_stop_types_by_line, validate_bus_lines, find_transfer_stops, \
+    check_on_demand_stops
+from output_formatter import format_output
 
 
-def output(err, bus_lines, stops_start_final, transfers, interrupted=False, bad_line=None) -> None:
-    total_err = sum(err.values())
-    print(f"Type and field validation: {total_err} errors")
-    for key in correct_data_types:
-        print(f"{key}: {err[key]}")
-    print()
-    print("Line names and number of stops:")
-    for bus, stops in bus_lines.items():
-        print(f"bus_id: {bus} stops: {stops}")
-    if interrupted:
-        print(f"There is no start or end stop for the line: {bad_line}")
-    else:
-        # stops_start_final = {"bus_id":{"S":["stop_name",...], "F":["stop_name",...]}}
-        starts, finishes = get_unique_stops_by_type(stops_start_final)
-        print(f"\nStart stops: {len(starts)} {starts}")
-        print(f"Transfer stops: {len(transfers)} {transfers}")
-        print(f"Finish stops: {len(finishes)} {finishes}")
+def process_bus_data(data: List[Dict]) -> None:
+    """Process bus route data and output validation results.
 
-
-def get_unique_stops_by_type(stops_start_final):
-    start_stops = set()
-    finish_stops = set()
-    # stops_start_final = {"bus_id":{"S":["stop_name",...], "F":["stop_name",...]}}
-    for stops in stops_start_final.values():
-        start_stops.update(stops["S"])
-        finish_stops.update(stops["F"])
-    return sorted(start_stops), sorted(finish_stops)
-
-
-def is_required_field_valid(value: str | None, required: bool) -> bool:
-    return not (required and value == "")
-
-
-def is_type_valid(value, expected_type) -> bool:
-    return isinstance(value, expected_type)
-
-
-def is_format_valid(value, format_pattern) -> bool:
-    return format_pattern is False or re.match(format_pattern, str(value))
-
-
-def aggregate_errors(data: dict) -> dict[str, int]:
-    # Check if input data for errors in data and/or format
-
-    # Creates comprehensive list of errors for respective keys from data.dictionary
-    error_list = {key: 0 for key in correct_data_types}
-
-    # Creates dict of lists, grouped by bus-line "bus_id":
-    bus_lines = {}
-    # bus_lines = {"bus_id"#1:[line#1,line#2,...], "bus_id"#2:[line#1,line#2,...], "bus_id"#3:[line#1,line#2,...]}
-    for line in data:
-        bus_id = line.get("bus_id")
-        if isinstance(bus_id, int):
-            bus_lines.setdefault(bus_id, []).append(line) # {"bus_id"#1:[bus-line#1,...], "bus_id"#2:[...],...}
-
-    for line in data:
-        for field, specs in correct_data_types.items():
-            value = line.get(field)
-            required = specs["required"]
-            expected_type = specs["type"]
-            format_pattern = specs["format"]
-
-            # Check for required fields
-            if not is_required_field_valid(value, required):
-                error_list[field] += 1
-                continue
-
-            # Check for correct type
-            if value is not None and not is_type_valid(value, expected_type):
-                error_list[field] += 1
-                continue
-
-            # Check format if pattern exist
-            if value is not None and not is_format_valid(value, format_pattern):
-                error_list[field] += 1
-
-    # Check time "a_time" chronology for each bus-line "bus_id", should be ascending
-    for bus_id, bus_line in bus_lines.items():
-        previous_stop_time = datetime.strptime("00:00", "%H:%M") # Default first time set to 00:00
-        for stop in bus_line:
-            time_str = stop.get("a_time")
-            try:
-                current_time = datetime.strptime(str(time_str), "%H:%M")
-            except (ValueError, TypeError):
-                continue  # Format error already counted above
-
-            if current_time <= previous_stop_time:
-                error_list["a_time"] += 1
-                break  # Stop checking this line once error is found
-            previous_stop_time = current_time
-
-    return error_list
-
-
-def count_bus_stops(data: list[dict]) -> dict[int, int]:
-    stop_counts = {}
-
-    for line in data:
-        bus_id = line.get("bus_id")
-
-        # Only count valid bus_id entries
-        if isinstance(bus_id, int):
-            stop_counts[bus_id] = stop_counts.get(bus_id, 0) + 1
-
-    return stop_counts
-
-
-def get_stop_types_by_line(data: list[dict]) -> dict[int, dict[str, list[str]]]:
-    stops_start_final = {}
-
-    for line in data:
-        bus_id = line["bus_id"]
-        stop_name = line["stop_name"]
-        stop_type = line.get("stop_type", "")
-
-        if isinstance(bus_id, int) and isinstance(stop_name, str):
-            stops_start_final.setdefault(bus_id, {"S": [], "F": []})  # {"bus_id":{"S":[], "F":[]}}
-            if stop_type in ("S", "F"):
-                stops_start_final[bus_id][stop_type].append(
-                    stop_name)  # {"bus_id":{"S":["stop_name",...], "F":["stop_name",...]}}
-
-    return stops_start_final
-
-
-def valid_bus_line(stop_type_map: dict[int, dict[str, list[str]]]) -> tuple[bool, int | None]:
-    # Check if bus-line has start & final stops, interrupt if any does not meet this condition
-    # Change possibility: check and output all bad bus-lines in list
-    for bus_id, stops in stop_type_map.items():
-        if len(stops["S"]) != 1 or len(stops["F"]) != 1:
-            print(f"There is no start or end stop for the line: {bus_id}")
-            return False, bus_id  # interrupt, do not continue checking other bus-lines
-    return True, None
-
-
-def find_transfer_stops(data) -> list:
-    transfer_stops = {}
-    for line in data:
-        stop_name = line["stop_name"]
-        bus_id = line["bus_id"]
-        transfer_stops.setdefault(stop_name, set()).add(bus_id)  # {"stop_name":(bus_line#1, bus_line#2,...)}
-
-    # Select stop_names with at least 2 bus-lines, return sorted list
-    transfers = [stop_name for stop_name, bus_lines in transfer_stops.items() if len(bus_lines) > 1]
-
-    return sorted(transfers)
-
-
-def check_on_demand_stops(data: list[dict], stops_start_final: dict, transfer_stops: list[str]) -> None:
-    # Collect all critical stops: Start, Final, Transfer
-    critical_stops = set()
-    for stops in stops_start_final.values():
-        critical_stops.update(stops["S"])
-        critical_stops.update(stops["F"])
-    critical_stops.update(transfer_stops)
-
-    # Find On-demand stops that should not be On-demand
-    wrong_on_demand = set()
-    for line in data:
-        stop_type = line.get("stop_type")
-        stop_name = line.get("stop_name")
-        if stop_type == "O" and stop_name not in critical_stops:
-            wrong_on_demand.add(stop_name)
-
-    # Output the results
-    print(f"On demand stops: {len(wrong_on_demand)} {sorted(wrong_on_demand)}")
-
-
-def load_data() -> list:
-    return json.loads(input())
-
-
-def main():
-    # # Open and read the JSON file
-    # with open('test_file_61.json', 'r', encoding='utf-8') as file:
-    #     data = json.load(file)
-
-    data = load_data()
-
-    # Check errors in input file
-    result_errors = aggregate_errors(data)
-
-    # Count number of stops for respective bus-line
+    Args:
+        data: List of stop dictionaries.
+    """
+    errors = aggregate_errors(data)
     bus_lines = count_bus_stops(data)
+    stop_types = get_stop_types_by_line(data)
+    valid, bad_bus = validate_bus_lines(stop_types)
+    transfers = find_transfer_stops(data)
+    on_demand_stops = check_on_demand_stops(data, stop_types, transfers)
+    format_output(errors, bus_lines, stop_types, transfers, valid, bad_bus, on_demand_stops)
 
-    # Check and assign to list Start & Final stops for respective bus-line
-    stops_start_final = get_stop_types_by_line(data)
 
-    # Check if bus-line has Start & Final stops, interrupt if any does not meet this condition
-    valid, bad_bus = valid_bus_line(stops_start_final)
+def main(file_path: Optional[str] = "test_file_6.json") -> None:
+    """Main function to orchestrate bus route validation.
 
-    # Check and sort Start / Transfer / Final stops for respective bus-line
-    stops_transfer = find_transfer_stops(data)
+    Args:
+        file_path: Path to the JSON file, or None for standard input.
+    """
+    try:
+        data = load_data(file_path)
+        process_bus_data(data)
+    except (ValueError, FileNotFoundError) as e:
+        print(f"Error: {e}")
 
-    # Output results
-    output(result_errors, bus_lines, stops_start_final, stops_transfer, interrupted=not valid, bad_line=bad_bus)
-
-    # Check On-demand stops
-    check_on_demand_stops(data, stops_start_final, stops_transfer)
 
 if __name__ == "__main__":
-    main()
+    # main(file_path=None)  # Use stdin instead of file
+    main() # Use JSON file
